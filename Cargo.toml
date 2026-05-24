@@ -7,11 +7,11 @@ authors = ["Robert Kende"]
 license = "Apache-2.0"
 description = "A lightweight Unix-style CLI for inspecting Parquet files."
 readme = "README.md"
-homepage = "https://github.com/r0k3/parqcat"
 repository = "https://github.com/r0k3/parqcat"
 documentation = "https://docs.rs/parqcat"
 keywords = ["parquet", "cli", "jsonl", "arrow"]
 categories = ["command-line-utilities"]
+exclude = [".github/", ".gitignore"]
 
 [dependencies]
 arrow-array = "58.3.0"
