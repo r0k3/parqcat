@@ -6,7 +6,26 @@
 
 Parquet is a good storage format, but quick inspection often means starting Python, a JVM tool, a SQL shell, or a larger data system. `parqcat` is meant to cover the everyday terminal workflow: show rows, preview the beginning or end of a file, inspect the schema, and pipe rows into tools such as `jq`.
 
-Author: Robert Kende
+## Install
+
+From crates.io:
+
+```text
+cargo install parqcat
+```
+
+From this repository:
+
+```text
+cargo install --path .
+```
+
+For development:
+
+```text
+cargo build
+cargo test
+```
 
 ## Features
 
@@ -28,6 +47,7 @@ parqcat schema <FILE>
 ```
 
 Examples:
+Author: Robert Kende
 
 ```text
 parqcat cat data.parquet
@@ -94,27 +114,6 @@ Not supported in v1:
 - SQL, filtering, projection, or file mutation
 - CSV output
 - encrypted Parquet files requiring keys
-
-## Install
-
-From crates.io:
-
-```text
-cargo install parqcat
-```
-
-From this repository:
-
-```text
-cargo install --path .
-```
-
-For development:
-
-```text
-cargo build
-cargo test
-```
 
 ## Development
 
