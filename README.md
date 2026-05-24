@@ -1,5 +1,7 @@
 # parqcat
 
+[![CI](https://github.com/r0k3/parqcat/actions/workflows/ci.yml/badge.svg)](https://github.com/r0k3/parqcat/actions/workflows/ci.yml)
+
 `parqcat` is a lightweight command-line utility for inspecting local Parquet files.
 
 Parquet is a good storage format, but quick inspection often means starting Python, a JVM tool, a SQL shell, or a larger data system. `parqcat` is meant to cover the everyday terminal workflow: show rows, preview the beginning or end of a file, inspect the schema, and pipe rows into tools such as `jq`.
@@ -95,6 +97,12 @@ Not supported in v1:
 
 ## Install
 
+From crates.io:
+
+```text
+cargo install parqcat
+```
+
 From this repository:
 
 ```text
@@ -107,8 +115,6 @@ For development:
 cargo build
 cargo test
 ```
-
-Release packages and binary archives are tracked in [PACKAGING.md](PACKAGING.md).
 
 ## Development
 
