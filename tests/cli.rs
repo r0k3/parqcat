@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
@@ -11,8 +10,6 @@ use arrow_array::{
     Time64MicrosecondArray, TimestampMillisecondArray,
 };
 use arrow_schema::{DataType, Field, Schema};
-use flate2::Compression as GzipCompression;
-use flate2::write::GzEncoder;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -173,14 +170,10 @@ fn nested_and_dictionary_jsonl() {
 }
 
 #[test]
-fn gzip_and_zstd_outer_wrappers_are_read_transparently() {
+fn parquet_file_is_read_without_interpreting_suffix_as_wrapper() {
     let dir = tempdir().unwrap();
-    let parquet_path = dir.path().join("flat.parquet");
-    let gzip_path = dir.path().join("flat.parquet.gz");
-    let zstd_path = dir.path().join("flat.parquet.zst");
-    write_flat_fixture(&parquet_path);
-    gzip_file(&parquet_path, &gzip_path);
-    zstd_file(&parquet_path, &zstd_path);
+    let path = dir.path().join("parquetA.zstd");
+    write_flat_fixture(&path);
 
     let expected = r#"{"id":5,"name":"epsilon","active":true,"score":null,"payload":"base64:AP8="}"#
         .to_string() + "\n";
@@ -188,15 +181,7 @@ fn gzip_and_zstd_outer_wrappers_are_read_transparently() {
     assert_success(
         parqcat()
             .args(["tail", "-n", "1"])
-            .arg(&gzip_path)
-            .output()
-            .unwrap(),
-        &expected,
-    );
-    assert_success(
-        parqcat()
-            .args(["tail", "-n", "1"])
-            .arg(&zstd_path)
+            .arg(&path)
             .output()
             .unwrap(),
         &expected,
@@ -447,17 +432,4 @@ fn write_parquet(path: &Path, schema: Arc<Schema>, batches: &[RecordBatch]) {
         writer.write(batch).unwrap();
     }
     writer.close().unwrap();
-}
-
-fn gzip_file(input: &Path, output: &Path) {
-    let mut encoder = GzEncoder::new(File::create(output).unwrap(), GzipCompression::default());
-    let bytes = std::fs::read(input).unwrap();
-    encoder.write_all(&bytes).unwrap();
-    encoder.finish().unwrap();
-}
-
-fn zstd_file(input: &Path, output: &Path) {
-    let bytes = std::fs::read(input).unwrap();
-    let compressed = zstd::stream::encode_all(bytes.as_slice(), 3).unwrap();
-    std::fs::write(output, compressed).unwrap();
 }

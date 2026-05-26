@@ -34,7 +34,6 @@ cargo test
 - `schema` command for logical schema inspection without decoding row data.
 - Table output for quick terminal viewing.
 - JSONL output for scripts and pipelines.
-- Transparent support for `.gz`, `.zst`, and `.zstd` outer-compressed Parquet files.
 - Support for common Parquet primitive, nested, dictionary, temporal, decimal, and binary values.
 
 ## Usage
@@ -52,7 +51,7 @@ Author: Robert Kende
 ```text
 parqcat cat data.parquet
 parqcat head -n 20 events.parquet
-parqcat tail --lines 5 archive/events.parquet.zstd
+parqcat tail --lines 5 archive/events.parquet
 parqcat schema data.parquet
 ```
 
@@ -104,13 +103,13 @@ Supported:
 - dictionary encoding
 - nested lists, structs, and maps
 - common Parquet internal compression codecs
-- outer `.gz`, `.zst`, and `.zstd` wrappers
 
 Not supported in v1:
 
 - stdin
 - remote object stores
 - multiple input files
+- outer compression wrappers such as `.gz`, `.zst`, and `.zstd`
 - SQL, filtering, projection, or file mutation
 - CSV output
 - encrypted Parquet files requiring keys
