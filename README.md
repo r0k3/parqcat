@@ -8,6 +8,12 @@ Parquet is a good storage format, but quick inspection often means starting Pyth
 
 ## Install
 
+With Homebrew (macOS and Linux):
+
+```text
+brew install r0k3/tap/parqcat
+```
+
 From crates.io:
 
 ```text

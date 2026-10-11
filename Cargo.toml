@@ -7,11 +7,12 @@ authors = ["Robert Kende"]
 license = "Apache-2.0"
 description = "A lightweight Unix-style CLI for inspecting Parquet files."
 readme = "README.md"
+homepage = "https://github.com/r0k3/parqcat"
 repository = "https://github.com/r0k3/parqcat"
 documentation = "https://docs.rs/parqcat"
 keywords = ["parquet", "cli", "jsonl", "arrow"]
 categories = ["command-line-utilities"]
-exclude = [".github/", ".gitignore"]
+exclude = [".github/", ".gitignore", "dist-workspace.toml"]
 
 [dependencies]
 arrow-array = "58.3.0"
@@ -37,3 +38,8 @@ tempfile = "3.27.0"
 codegen-units = 1
 lto = "thin"
 strip = "symbols"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
