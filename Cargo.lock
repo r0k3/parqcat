@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "parqcat"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "arrow-array",
  "arrow-schema",
