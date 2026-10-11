@@ -11,14 +11,18 @@ Parquet is a good storage format, but quick inspection often means starting Pyth
 From crates.io:
 
 ```text
-cargo install parqcat
+cargo install --locked parqcat
 ```
 
 From this repository:
 
 ```text
-cargo install --path .
+cargo install --locked --path .
 ```
+
+`--locked` builds with the exact dependency versions `parqcat` is tested against.
+
+Building requires Rust 1.97 or newer. `parqcat` supports the latest stable Rust release and the two before it; the minimum version is raised as new releases come out.
 
 For development:
 

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Catch breakage from new Rust releases between pushes.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -13,8 +16,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    name: Rust
+  lint:
+    name: Lint and package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -23,6 +26,48 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo publish --dry-run --locked
+
+  test:
+    name: Test (${{ matrix.rust }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # New beta releases must not block merges; failures still show in the run.
+    continue-on-error: ${{ matrix.rust == 'beta' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        rust: [msrv, stable, beta]
+        include:
+          - os: macos-latest
+            rust: stable
+    steps:
+      - uses: actions/checkout@v5
+      - name: Resolve toolchain
+        id: toolchain
+        shell: bash
+        run: |
+          if [ "${{ matrix.rust }}" = msrv ]; then
+            version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)
+          else
+            version=${{ matrix.rust }}
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+
+  # `cargo install` without `--locked` ignores Cargo.lock and resolves the
+  # newest compatible dependencies; test that combination too.
+  latest-deps:
+    name: Test (latest dependencies)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo update --verbose
+      - run: cargo test

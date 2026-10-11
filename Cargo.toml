@@ -2,7 +2,7 @@
 name = "parqcat"
 version = "1.0.1"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97"
 authors = ["Robert Kende"]
 license = "Apache-2.0"
 description = "A lightweight Unix-style CLI for inspecting Parquet files."
