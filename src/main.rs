@@ -1,4 +1,4 @@
-use std::io::IsTerminal;
+use std::io::{BufWriter, IsTerminal};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -11,7 +11,7 @@ fn main() -> ExitCode {
 
     parqcat::main_entry_with_default_format(
         std::env::args_os().skip(1),
-        stdout,
+        BufWriter::new(stdout.lock()),
         std::io::stderr(),
         default_format,
     )

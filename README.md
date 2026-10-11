@@ -46,7 +46,6 @@ parqcat schema <FILE>
 ```
 
 Examples:
-Author: Robert Kende
 
 ```text
 parqcat cat data.parquet

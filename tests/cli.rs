@@ -286,6 +286,37 @@ fn usage_and_runtime_errors_have_expected_exit_codes() {
     assert_eq!(corrupt.status.code(), Some(1));
 }
 
+#[test]
+fn table_aligns_wide_characters_by_display_width() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("wide.parquet");
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("label", DataType::Utf8, false),
+        Field::new("n", DataType::Int32, false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["日本", "日本語のテキスト", "ascii"])),
+            Arc::new(Int32Array::from(vec![1, 2, 3])),
+        ],
+    )
+    .unwrap();
+    write_parquet(&path, schema, &[batch]);
+
+    let output = parqcat().args(["cat", "-t"]).arg(&path).output().unwrap();
+
+    // "日本" and "日本..." are 4 and 7 terminal columns wide, not 2 and 5.
+    let expected = [
+        "label     n       ",
+        "--------  --------",
+        "日本      1       ",
+        "日本...   2       ",
+        "ascii     3       ",
+    ];
+    assert_success(output, &format!("{}\n", expected.join("\n")));
+}
+
 fn assert_success(output: Output, expected_stdout: &str) {
     assert!(
         output.status.success(),

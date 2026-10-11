@@ -33,10 +33,16 @@ where
     W: Write,
     E: Write,
 {
-    match run(args, stdout, &mut stderr, default_format) {
+    let mut stdout = stdout;
+    let result = run(args, &mut stdout, &mut stderr, default_format)
+        .and_then(|code| stdout.flush().map(|()| code).map_err(Into::into));
+
+    match result {
         Ok(code) => code,
         Err(err) if err.is_broken_pipe() => ExitCode::SUCCESS,
         Err(err) => {
+            // Emit rows decoded before the failure ahead of the diagnostic.
+            let _ = stdout.flush();
             let _ = writeln!(stderr, "error: {err}");
             ExitCode::from(1)
         }

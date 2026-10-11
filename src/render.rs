@@ -16,6 +16,7 @@ use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use chrono::{DateTime, Utc};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::error::{Error, Result};
 
@@ -323,8 +324,15 @@ fn truncate_cell(cell: &str, width: usize) -> String {
         return ".".repeat(width);
     }
 
+    let budget = width - 3;
+    let mut used = 0;
     let mut truncated = String::new();
-    for ch in cell.chars().take(width - 3) {
+    for ch in cell.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if used + ch_width > budget {
+            break;
+        }
+        used += ch_width;
         truncated.push(ch);
     }
     truncated.push_str("...");
@@ -332,7 +340,7 @@ fn truncate_cell(cell: &str, width: usize) -> String {
 }
 
 fn display_width(value: &str) -> usize {
-    value.chars().count()
+    value.width()
 }
 
 fn write_value(

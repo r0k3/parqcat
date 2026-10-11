@@ -11,3 +11,6 @@ Thumbs.db
 *~
 /coverage/
 /dist/
+
+# Local agent session pointer
+/session
