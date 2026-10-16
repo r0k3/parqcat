@@ -317,6 +317,73 @@ fn table_aligns_wide_characters_by_display_width() {
     assert_success(output, &format!("{}\n", expected.join("\n")));
 }
 
+#[test]
+fn table_cells_show_plain_text_for_scalars_and_json_for_nested_values() {
+    let dir = tempdir().unwrap();
+
+    let nested = dir.path().join("nested.parquet");
+    write_nested_fixture(&nested);
+    assert_table(
+        &nested,
+        &[
+            "id        category  tags      profile ",
+            "--------  --------  --------  --------",
+            "1         alpha     [1,2]     {\"cit...",
+            "2         beta      []        {\"cit...",
+            "3         alpha     null      {\"cit...",
+        ],
+    );
+
+    let temporal = dir.path().join("temporal.parquet");
+    write_temporal_fixture(&temporal);
+    assert_table(
+        &temporal,
+        &[
+            "date        time             ts_utc                    ts_naive                 amount  ",
+            "----------  ---------------  ------------------------  -----------------------  --------",
+            "1970-01-02  12:34:56.789000  1970-01-01T00:00:01.000Z  1970-01-01T00:00:01.000  123.45  ",
+            "null        null             null                      null                     -6.78   ",
+        ],
+    );
+
+    let escapes = dir.path().join("escapes.parquet");
+    let text = Arc::new(StringArray::from(vec![
+        "say \"hi\"",
+        "back\\slash",
+        "tab\there",
+    ])) as ArrayRef;
+    let nested_text = Arc::new(StructArray::from(vec![(
+        Arc::new(Field::new("s", DataType::Utf8, false)),
+        Arc::new(StringArray::from(vec!["q\"", "b\\", "t\t"])) as ArrayRef,
+    )])) as ArrayRef;
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("text_value_header", DataType::Utf8, false),
+        Field::new(
+            "nested_value_header",
+            nested_text.data_type().clone(),
+            false,
+        ),
+    ]));
+    let batch = RecordBatch::try_new(schema.clone(), vec![text, nested_text]).unwrap();
+    write_parquet(&escapes, schema, &[batch]);
+    // Top-level strings are shown unescaped; nested values stay JSON-escaped.
+    assert_table(
+        &escapes,
+        &[
+            "text_value_header  nested_value_header",
+            "-----------------  -------------------",
+            "say \"hi\"           {\"s\":\"q\\\"\"}        ",
+            "back\\slash         {\"s\":\"b\\\\\"}        ",
+            "tab here           {\"s\":\"t\\t\"}        ",
+        ],
+    );
+}
+
+fn assert_table(path: &Path, expected: &[&str]) {
+    let output = parqcat().args(["cat", "-t"]).arg(path).output().unwrap();
+    assert_success(output, &format!("{}\n", expected.join("\n")));
+}
+
 fn assert_success(output: Output, expected_stdout: &str) {
     assert!(
         output.status.success(),

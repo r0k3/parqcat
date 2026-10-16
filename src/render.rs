@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io::Write;
 
@@ -275,16 +276,26 @@ fn timestamp_table_width(unit: TimeUnit) -> usize {
 }
 
 fn display_value(array: &dyn Array, data_type: &DataType, row: usize) -> Result<String> {
+    if array.is_null(row) {
+        return Ok("null".to_string());
+    }
+
+    if let DataType::Dictionary(key_type, value_type) = data_type {
+        return match dictionary_entry(array, key_type, row)? {
+            Some((values, index)) => display_value(values, value_type, index),
+            None => Ok("null".to_string()),
+        };
+    }
+
+    if let Some(text) = text_value(array, data_type, row)? {
+        return Ok(text.into_owned());
+    }
+
+    // Numbers, booleans, and nested values display as their JSON form.
     let mut json = Vec::new();
     write_value(array, data_type, row, &mut json)?;
-    let json = String::from_utf8(json)
-        .map_err(|err| Error::Unsupported(format!("rendered value was not valid UTF-8: {err}")))?;
-
-    if json.starts_with('"') {
-        Ok(serde_json::from_str::<String>(&json)?)
-    } else {
-        Ok(json)
-    }
+    String::from_utf8(json)
+        .map_err(|err| Error::Unsupported(format!("rendered value was not valid UTF-8: {err}")))
 }
 
 fn write_table_row(output: &mut impl Write, cells: &[&str], widths: &[usize]) -> Result<()> {
@@ -354,6 +365,10 @@ fn write_value(
         return Ok(());
     }
 
+    if let Some(text) = text_value(array, data_type, row)? {
+        return write_json_str(output, &text);
+    }
+
     match data_type {
         DataType::Null => output.write_all(b"null")?,
         DataType::Boolean => write_bool(output, downcast::<BooleanArray>(array)?.value(row))?,
@@ -365,94 +380,10 @@ fn write_value(
         DataType::UInt16 => write!(output, "{}", downcast::<UInt16Array>(array)?.value(row))?,
         DataType::UInt32 => write!(output, "{}", downcast::<UInt32Array>(array)?.value(row))?,
         DataType::UInt64 => write!(output, "{}", downcast::<UInt64Array>(array)?.value(row))?,
-        DataType::Float16 => write_float(
-            output,
-            f64::from(downcast::<Float16Array>(array)?.value(row).to_f32()),
-        )?,
-        DataType::Float32 => write_float(
-            output,
-            f64::from(downcast::<Float32Array>(array)?.value(row)),
-        )?,
-        DataType::Float64 => write_float(output, downcast::<Float64Array>(array)?.value(row))?,
-        DataType::Utf8 => write_json_str(output, downcast::<StringArray>(array)?.value(row))?,
-        DataType::LargeUtf8 => {
-            write_json_str(output, downcast::<LargeStringArray>(array)?.value(row))?
+        // Non-finite floats were written as text above.
+        DataType::Float16 | DataType::Float32 | DataType::Float64 => {
+            serde_json::to_writer(&mut *output, &float_value(array, data_type, row)?)?
         }
-        DataType::Utf8View => {
-            write_json_str(output, downcast::<StringViewArray>(array)?.value(row))?
-        }
-        DataType::Binary => write_binary(output, downcast::<BinaryArray>(array)?.value(row))?,
-        DataType::LargeBinary => {
-            write_binary(output, downcast::<LargeBinaryArray>(array)?.value(row))?
-        }
-        DataType::BinaryView => {
-            write_binary(output, downcast::<BinaryViewArray>(array)?.value(row))?
-        }
-        DataType::FixedSizeBinary(_) => {
-            write_binary(output, downcast::<FixedSizeBinaryArray>(array)?.value(row))?
-        }
-        DataType::Decimal32(_, _) => write_json_str(
-            output,
-            &downcast::<Decimal32Array>(array)?.value_as_string(row),
-        )?,
-        DataType::Decimal64(_, _) => write_json_str(
-            output,
-            &downcast::<Decimal64Array>(array)?.value_as_string(row),
-        )?,
-        DataType::Decimal128(_, _) => write_json_str(
-            output,
-            &downcast::<Decimal128Array>(array)?.value_as_string(row),
-        )?,
-        DataType::Decimal256(_, _) => write_json_str(
-            output,
-            &downcast::<Decimal256Array>(array)?.value_as_string(row),
-        )?,
-        DataType::Date32 => write_json_str(
-            output,
-            &format_date32(downcast::<Date32Array>(array)?.value(row))?,
-        )?,
-        DataType::Date64 => write_json_str(
-            output,
-            &format_date64(downcast::<Date64Array>(array)?.value(row))?,
-        )?,
-        DataType::Time32(unit) => match unit {
-            TimeUnit::Second => write_json_str(
-                output,
-                &format_time(
-                    downcast::<Time32SecondArray>(array)?.value(row) as i64,
-                    TimeUnit::Second,
-                ),
-            )?,
-            TimeUnit::Millisecond => write_json_str(
-                output,
-                &format_time(
-                    downcast::<Time32MillisecondArray>(array)?.value(row) as i64,
-                    TimeUnit::Millisecond,
-                ),
-            )?,
-            _ => return unsupported_type(data_type),
-        },
-        DataType::Time64(unit) => match unit {
-            TimeUnit::Microsecond => write_json_str(
-                output,
-                &format_time(
-                    downcast::<Time64MicrosecondArray>(array)?.value(row),
-                    TimeUnit::Microsecond,
-                ),
-            )?,
-            TimeUnit::Nanosecond => write_json_str(
-                output,
-                &format_time(
-                    downcast::<Time64NanosecondArray>(array)?.value(row),
-                    TimeUnit::Nanosecond,
-                ),
-            )?,
-            _ => return unsupported_type(data_type),
-        },
-        DataType::Timestamp(unit, timezone) => write_json_str(
-            output,
-            &format_timestamp(array, *unit, timezone.is_some(), row)?,
-        )?,
         DataType::List(child) => write_list(
             downcast::<ListArray>(array)?.value(row).as_ref(),
             child,
@@ -486,7 +417,10 @@ fn write_value(
         )?,
         DataType::Map(_, _) => write_map(downcast::<MapArray>(array)?, row, output)?,
         DataType::Dictionary(key_type, value_type) => {
-            write_dictionary(array, key_type, value_type, row, output)?
+            match dictionary_entry(array, key_type, row)? {
+                Some((values, index)) => write_value(values, value_type, index, output)?,
+                None => output.write_all(b"null")?,
+            }
         }
         _ => return unsupported_type(data_type),
     }
@@ -494,29 +428,104 @@ fn write_value(
     Ok(())
 }
 
+/// Returns the text of a non-null value that JSON output renders as a string,
+/// unquoted and unescaped. Returns `None` for values rendered as JSON numbers,
+/// booleans, or nested JSON.
+fn text_value<'a>(
+    array: &'a dyn Array,
+    data_type: &DataType,
+    row: usize,
+) -> Result<Option<Cow<'a, str>>> {
+    let text = match data_type {
+        DataType::Float16 | DataType::Float32 | DataType::Float64 => {
+            return Ok(non_finite_text(float_value(array, data_type, row)?).map(Cow::Borrowed));
+        }
+        DataType::Utf8 => Cow::Borrowed(downcast::<StringArray>(array)?.value(row)),
+        DataType::LargeUtf8 => Cow::Borrowed(downcast::<LargeStringArray>(array)?.value(row)),
+        DataType::Utf8View => Cow::Borrowed(downcast::<StringViewArray>(array)?.value(row)),
+        DataType::Binary => Cow::Owned(binary_text(downcast::<BinaryArray>(array)?.value(row))),
+        DataType::LargeBinary => {
+            Cow::Owned(binary_text(downcast::<LargeBinaryArray>(array)?.value(row)))
+        }
+        DataType::BinaryView => {
+            Cow::Owned(binary_text(downcast::<BinaryViewArray>(array)?.value(row)))
+        }
+        DataType::FixedSizeBinary(_) => Cow::Owned(binary_text(
+            downcast::<FixedSizeBinaryArray>(array)?.value(row),
+        )),
+        DataType::Decimal32(_, _) => {
+            Cow::Owned(downcast::<Decimal32Array>(array)?.value_as_string(row))
+        }
+        DataType::Decimal64(_, _) => {
+            Cow::Owned(downcast::<Decimal64Array>(array)?.value_as_string(row))
+        }
+        DataType::Decimal128(_, _) => {
+            Cow::Owned(downcast::<Decimal128Array>(array)?.value_as_string(row))
+        }
+        DataType::Decimal256(_, _) => {
+            Cow::Owned(downcast::<Decimal256Array>(array)?.value_as_string(row))
+        }
+        DataType::Date32 => Cow::Owned(format_date32(downcast::<Date32Array>(array)?.value(row))?),
+        DataType::Date64 => Cow::Owned(format_date64(downcast::<Date64Array>(array)?.value(row))?),
+        DataType::Time32(TimeUnit::Second) => Cow::Owned(format_time(
+            downcast::<Time32SecondArray>(array)?.value(row) as i64,
+            TimeUnit::Second,
+        )),
+        DataType::Time32(TimeUnit::Millisecond) => Cow::Owned(format_time(
+            downcast::<Time32MillisecondArray>(array)?.value(row) as i64,
+            TimeUnit::Millisecond,
+        )),
+        DataType::Time64(TimeUnit::Microsecond) => Cow::Owned(format_time(
+            downcast::<Time64MicrosecondArray>(array)?.value(row),
+            TimeUnit::Microsecond,
+        )),
+        DataType::Time64(TimeUnit::Nanosecond) => Cow::Owned(format_time(
+            downcast::<Time64NanosecondArray>(array)?.value(row),
+            TimeUnit::Nanosecond,
+        )),
+        DataType::Timestamp(unit, timezone) => {
+            Cow::Owned(format_timestamp(array, *unit, timezone.is_some(), row)?)
+        }
+        _ => return Ok(None),
+    };
+
+    Ok(Some(text))
+}
+
 fn write_bool(output: &mut impl Write, value: bool) -> Result<()> {
     output.write_all(if value { b"true" } else { b"false" })?;
     Ok(())
 }
 
-fn write_float(output: &mut impl Write, value: f64) -> Result<()> {
-    if value.is_nan() {
-        write_json_str(output, "NaN")
-    } else if value == f64::INFINITY {
-        write_json_str(output, "+Inf")
-    } else if value == f64::NEG_INFINITY {
-        write_json_str(output, "-Inf")
-    } else {
-        serde_json::to_writer(output, &value)?;
-        Ok(())
+fn float_value(array: &dyn Array, data_type: &DataType, row: usize) -> Result<f64> {
+    match data_type {
+        DataType::Float16 => Ok(f64::from(
+            downcast::<Float16Array>(array)?.value(row).to_f32(),
+        )),
+        DataType::Float32 => Ok(f64::from(downcast::<Float32Array>(array)?.value(row))),
+        DataType::Float64 => Ok(downcast::<Float64Array>(array)?.value(row)),
+        _ => unsupported_type(data_type),
     }
 }
 
-fn write_binary(output: &mut impl Write, value: &[u8]) -> Result<()> {
+/// JSON has no NaN or infinity, so those are rendered as strings.
+fn non_finite_text(value: f64) -> Option<&'static str> {
+    if value.is_nan() {
+        Some("NaN")
+    } else if value == f64::INFINITY {
+        Some("+Inf")
+    } else if value == f64::NEG_INFINITY {
+        Some("-Inf")
+    } else {
+        None
+    }
+}
+
+fn binary_text(value: &[u8]) -> String {
     let mut encoded = String::with_capacity("base64:".len() + value.len().div_ceil(3) * 4);
     encoded.push_str("base64:");
     BASE64_STANDARD.encode_string(value, &mut encoded);
-    write_json_str(output, &encoded)
+    encoded
 }
 
 fn write_list(array: &dyn Array, child: &Field, output: &mut impl Write) -> Result<()> {
@@ -614,44 +623,34 @@ fn string_value(array: &dyn Array, row: usize) -> Result<&str> {
     }
 }
 
-fn write_dictionary(
-    array: &dyn Array,
+/// Resolves a dictionary-encoded value to its values array and index, or
+/// `None` when the key is null.
+fn dictionary_entry<'a>(
+    array: &'a dyn Array,
     key_type: &DataType,
-    value_type: &DataType,
     row: usize,
-    output: &mut impl Write,
-) -> Result<()> {
+) -> Result<Option<(&'a dyn Array, usize)>> {
     match key_type {
-        DataType::Int8 => write_dictionary_value::<Int8Type>(array, value_type, row, output),
-        DataType::Int16 => write_dictionary_value::<Int16Type>(array, value_type, row, output),
-        DataType::Int32 => write_dictionary_value::<Int32Type>(array, value_type, row, output),
-        DataType::Int64 => write_dictionary_value::<Int64Type>(array, value_type, row, output),
-        DataType::UInt8 => write_dictionary_value::<UInt8Type>(array, value_type, row, output),
-        DataType::UInt16 => write_dictionary_value::<UInt16Type>(array, value_type, row, output),
-        DataType::UInt32 => write_dictionary_value::<UInt32Type>(array, value_type, row, output),
-        DataType::UInt64 => write_dictionary_value::<UInt64Type>(array, value_type, row, output),
+        DataType::Int8 => dictionary_entry_for::<Int8Type>(array, row),
+        DataType::Int16 => dictionary_entry_for::<Int16Type>(array, row),
+        DataType::Int32 => dictionary_entry_for::<Int32Type>(array, row),
+        DataType::Int64 => dictionary_entry_for::<Int64Type>(array, row),
+        DataType::UInt8 => dictionary_entry_for::<UInt8Type>(array, row),
+        DataType::UInt16 => dictionary_entry_for::<UInt16Type>(array, row),
+        DataType::UInt32 => dictionary_entry_for::<UInt32Type>(array, row),
+        DataType::UInt64 => dictionary_entry_for::<UInt64Type>(array, row),
         _ => unsupported_type(key_type),
     }
 }
 
-fn write_dictionary_value<K: ArrowDictionaryKeyType>(
+fn dictionary_entry_for<K: ArrowDictionaryKeyType>(
     array: &dyn Array,
-    value_type: &DataType,
     row: usize,
-    output: &mut impl Write,
-) -> Result<()> {
+) -> Result<Option<(&dyn Array, usize)>> {
     let dictionary = downcast::<DictionaryArray<K>>(array)?;
-    let Some(value_index) = dictionary.key(row) else {
-        output.write_all(b"null")?;
-        return Ok(());
-    };
-
-    write_value(
-        dictionary.values().as_ref(),
-        value_type,
-        value_index,
-        output,
-    )
+    Ok(dictionary
+        .key(row)
+        .map(|index| (dictionary.values().as_ref(), index)))
 }
 
 fn format_date32(days: i32) -> Result<String> {
