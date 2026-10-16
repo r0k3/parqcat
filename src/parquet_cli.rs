@@ -75,16 +75,22 @@ fn stream(
     output_format: OutputFormat,
     output: &mut impl Write,
 ) -> Result<()> {
-    let reader = builder.build()?;
-    let mut table = None;
+    let mut reader = builder.build()?;
 
-    for batch in reader {
-        let batch = batch?;
-        match output_format {
-            OutputFormat::Jsonl => crate::render::write_json_batch(&batch, output)?,
-            OutputFormat::Table => {
-                let table = table.get_or_insert_with(|| crate::render::TableWriter::new(&batch));
-                table.write_batch(&batch, output)?;
+    match output_format {
+        OutputFormat::Jsonl => {
+            for batch in reader {
+                crate::render::write_json_batch(&batch?, output)?;
+            }
+        }
+        OutputFormat::Table => {
+            let Some(first) = reader.next().transpose()? else {
+                return Ok(());
+            };
+            let mut table = crate::render::TableWriter::new(&first)?;
+            table.write_batch(&first, output)?;
+            for batch in reader {
+                table.write_batch(&batch?, output)?;
             }
         }
     }

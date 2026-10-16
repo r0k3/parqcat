@@ -94,10 +94,10 @@ fn table_output_is_available_for_quick_terminal_views() {
     assert!(output.status.success(), "stderr:\n{}", stderr(&output));
     assert_eq!(stderr(&output), "");
     let stdout = stdout(&output);
-    assert!(stdout.starts_with("id        name      active    score     payload"));
-    assert!(stdout.contains("--------  --------  --------  --------  --------"));
-    assert!(stdout.contains("1         alpha     true      1.5       base6..."));
-    assert!(stdout.contains("2         beta      false     NaN       base6..."));
+    assert!(stdout.starts_with("id  name   active  score  payload"));
+    assert!(stdout.contains("--  -----  ------  -----  -----------"));
+    assert!(stdout.contains("1   alpha  true    1.5    base64:AAEC"));
+    assert!(stdout.contains("2   beta   false   NaN    base64:aGk="));
     assert!(!stdout.starts_with('{'));
 }
 
@@ -297,7 +297,11 @@ fn table_aligns_wide_characters_by_display_width() {
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![
-            Arc::new(StringArray::from(vec!["日本", "日本語のテキスト", "ascii"])),
+            Arc::new(StringArray::from(vec![
+                "日本",
+                "日本語のテキストを表示する長い説明です",
+                "ascii",
+            ])),
             Arc::new(Int32Array::from(vec![1, 2, 3])),
         ],
     )
@@ -306,13 +310,14 @@ fn table_aligns_wide_characters_by_display_width() {
 
     let output = parqcat().args(["cat", "-t"]).arg(&path).output().unwrap();
 
-    // "日本" and "日本..." are 4 and 7 terminal columns wide, not 2 and 5.
+    // The long label is 38 terminal columns wide, so it is cut to fit the
+    // 32-column limit: 14 wide characters (28 columns) plus "...".
     let expected = [
-        "label     n       ",
-        "--------  --------",
-        "日本      1       ",
-        "日本...   2       ",
-        "ascii     3       ",
+        "label                             n",
+        "--------------------------------  -",
+        "日本                              1",
+        "日本語のテキストを表示する長...   2",
+        "ascii                             3",
     ];
     assert_success(output, &format!("{}\n", expected.join("\n")));
 }
@@ -326,11 +331,11 @@ fn table_cells_show_plain_text_for_scalars_and_json_for_nested_values() {
     assert_table(
         &nested,
         &[
-            "id        category  tags      profile ",
-            "--------  --------  --------  --------",
-            "1         alpha     [1,2]     {\"cit...",
-            "2         beta      []        {\"cit...",
-            "3         alpha     null      {\"cit...",
+            "id  category  tags   profile                   ",
+            "--  --------  -----  --------------------------",
+            "1   alpha     [1,2]  {\"city\":\"NYC\",\"zip\":10001}",
+            "2   beta      []     {\"city\":null,\"zip\":null}  ",
+            "3   alpha     null   {\"city\":\"LA\",\"zip\":90001} ",
         ],
     );
 
@@ -339,10 +344,10 @@ fn table_cells_show_plain_text_for_scalars_and_json_for_nested_values() {
     assert_table(
         &temporal,
         &[
-            "date        time             ts_utc                    ts_naive                 amount  ",
-            "----------  ---------------  ------------------------  -----------------------  --------",
-            "1970-01-02  12:34:56.789000  1970-01-01T00:00:01.000Z  1970-01-01T00:00:01.000  123.45  ",
-            "null        null             null                      null                     -6.78   ",
+            "date        time             ts_utc                    ts_naive                 amount",
+            "----------  ---------------  ------------------------  -----------------------  ------",
+            "1970-01-02  12:34:56.789000  1970-01-01T00:00:01.000Z  1970-01-01T00:00:01.000  123.45",
+            "null        null             null                      null                     -6.78 ",
         ],
     );
 
@@ -377,6 +382,35 @@ fn table_cells_show_plain_text_for_scalars_and_json_for_nested_values() {
             "tab here           {\"s\":\"t\\t\"}        ",
         ],
     );
+}
+
+#[test]
+fn table_columns_keep_the_widths_of_the_first_batch() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("batches.parquet");
+    // The reader yields 8192 rows per batch, so the last row is in the second
+    // batch and is cut to the width chosen from the first.
+    let mut values = vec!["short"; 8192];
+    values.push("much wider value");
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "value",
+        DataType::Utf8,
+        false,
+    )]));
+    let batch =
+        RecordBatch::try_new(schema.clone(), vec![Arc::new(StringArray::from(values))]).unwrap();
+    let mut writer = ArrowWriter::try_new(File::create(&path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    let output = parqcat().args(["cat", "-t"]).arg(&path).output().unwrap();
+
+    assert!(output.status.success(), "stderr:\n{}", stderr(&output));
+    let stdout = stdout(&output);
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2 + 8193);
+    assert_eq!(lines[..3], ["value", "-----", "short"]);
+    assert_eq!(lines.last(), Some(&"mu..."));
 }
 
 fn assert_table(path: &Path, expected: &[&str]) {

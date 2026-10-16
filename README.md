@@ -9,13 +9,13 @@
 
 ```console
 $ parqcat head -n 5 events.parquet
-id        ts                        user      event_type  status    amount    tags
---------  ------------------------  --------  ----------  --------  --------  --------
-1000      2025-10-09T08:53:20.000Z  ada       page_view   failed    null      []
-1001      2025-10-09T08:53:57.892Z  margaret  refund      ok        -24.21    ["vip"]
-1002      2025-10-09T08:54:34.884Z  dennis    refund      ok        -46.43    null
-1003      2025-10-09T08:55:11.877Z  linus     page_view   ok        null      ["vip"]
-1004      2025-10-09T08:55:48.869Z  barbara   page_view   ok        null      null
+id    ts                        user      event_type  status  amount  tags
+----  ------------------------  --------  ----------  ------  ------  -------
+1000  2025-10-09T08:53:20.000Z  ada       page_view   failed  null    []
+1001  2025-10-09T08:53:57.892Z  margaret  refund      ok      -24.21  ["vip"]
+1002  2025-10-09T08:54:34.884Z  dennis    refund      ok      -46.43  null
+1003  2025-10-09T08:55:11.877Z  linus     page_view   ok      null    ["vip"]
+1004  2025-10-09T08:55:48.869Z  barbara   page_view   ok      null    null
 ```
 
 ```console
@@ -132,7 +132,7 @@ $ parqcat cat events.parquet | wc -l
 
 **JSONL** has one compact JSON object per row. Decimals are written as strings so no precision is lost. Timestamps use RFC 3339 format, and binary values are written as `base64:...` strings.
 
-**Tables** are meant for people. They are compact, deterministic, and uncolored. Very wide values are truncated, and nested values are shown as JSON. Date, time, and timestamp columns reserve enough width for common rendered values. In schema output, nested fields are indented below their parent field.
+**Tables** are meant for people. They are compact, deterministic, and uncolored. Each column is sized to fit its header and the first 8,192 rows, up to 32 characters; longer values are truncated. Nested values are shown as JSON. Date, time, and timestamp columns reserve enough width for common rendered values. In schema output, nested fields are indented below their parent field.
 
 <details>
 <summary><strong>Supported input</strong></summary>

@@ -21,7 +21,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::error::{Error, Result};
 
-const MIN_TABLE_COLUMN_WIDTH: usize = 8;
 const MAX_TABLE_COLUMN_WIDTH: usize = 32;
 
 pub fn write_json_batch(batch: &RecordBatch, output: &mut impl Write) -> Result<()> {
@@ -55,20 +54,26 @@ pub struct TableWriter {
 }
 
 impl TableWriter {
-    pub fn new(batch: &RecordBatch) -> Self {
+    /// Sizes each column to fit its header and the values in `batch`, which
+    /// should be the first batch written. Later batches reuse these widths.
+    pub fn new(batch: &RecordBatch) -> Result<Self> {
         let fields = batch
             .schema()
             .fields()
             .iter()
             .map(|field| field.as_ref().clone())
             .collect::<Vec<_>>();
-        let widths = fields.iter().map(table_column_width).collect();
+        let widths = fields
+            .iter()
+            .zip(batch.columns())
+            .map(|(field, column)| table_column_width(field, column.as_ref()))
+            .collect::<Result<_>>()?;
 
-        Self {
+        Ok(Self {
             fields,
             widths,
             wrote_header: false,
-        }
+        })
     }
 
     pub fn write_batch(&mut self, batch: &RecordBatch, output: &mut impl Write) -> Result<()> {
@@ -239,11 +244,19 @@ fn write_padded(output: &mut impl Write, cell: &str, width: usize) -> Result<()>
     Ok(())
 }
 
-fn table_column_width(field: &Field) -> usize {
-    let header_width =
-        display_width(field.name()).clamp(MIN_TABLE_COLUMN_WIDTH, MAX_TABLE_COLUMN_WIDTH);
-    let data_width = temporal_table_width(field.data_type()).unwrap_or(MIN_TABLE_COLUMN_WIDTH);
-    header_width.max(data_width).min(MAX_TABLE_COLUMN_WIDTH)
+fn table_column_width(field: &Field, column: &dyn Array) -> Result<usize> {
+    // Temporal columns reserve room for a full value even if the first batch
+    // is all nulls.
+    let mut width =
+        display_width(field.name()).max(temporal_table_width(field.data_type()).unwrap_or(0));
+    for row in 0..column.len() {
+        if width >= MAX_TABLE_COLUMN_WIDTH {
+            break;
+        }
+        let display = display_value(column, field.data_type(), row)?;
+        width = width.max(display_width(&normalize_cell(&display)));
+    }
+    Ok(width.min(MAX_TABLE_COLUMN_WIDTH))
 }
 
 fn temporal_table_width(data_type: &DataType) -> Option<usize> {
