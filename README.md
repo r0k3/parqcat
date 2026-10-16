@@ -1,28 +1,76 @@
 # parqcat
 
+**`cat` for Parquet files.** Peek at rows, check the schema, and pipe data into `jq`, all from one small native binary. No Python, JVM, or SQL shell required.
+
 [![CI](https://github.com/r0k3/parqcat/actions/workflows/ci.yml/badge.svg)](https://github.com/r0k3/parqcat/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/parqcat.svg)](https://crates.io/crates/parqcat)
+[![MSRV](https://img.shields.io/crates/msrv/parqcat.svg)](#install)
+[![License](https://img.shields.io/crates/l/parqcat.svg)](LICENSE)
 
-`parqcat` is a lightweight command-line utility for inspecting local Parquet files.
+```console
+$ parqcat head -n 5 events.parquet
+id        ts                        user      event_type  status    amount    tags
+--------  ------------------------  --------  ----------  --------  --------  --------
+1000      2025-10-09T08:53:20.000Z  ada       page_view   failed    null      []
+1001      2025-10-09T08:53:57.892Z  margaret  refund      ok        -24.21    ["vip"]
+1002      2025-10-09T08:54:34.884Z  dennis    refund      ok        -46.43    null
+1003      2025-10-09T08:55:11.877Z  linus     page_view   ok        null      ["vip"]
+1004      2025-10-09T08:55:48.869Z  barbara   page_view   ok        null      null
+```
 
-Parquet is a good storage format, but quick inspection often means starting Python, a JVM tool, a SQL shell, or a larger data system. `parqcat` is meant to cover the everyday terminal workflow: show rows, preview the beginning or end of a file, inspect the schema, and pipe rows into tools such as `jq`.
+```console
+$ parqcat schema events.parquet
+name        type                    nullable
+----------  ----------------------  --------
+id          Int64                   no
+ts          Timestamp(ms, "UTC")    no
+user        Utf8                    no
+event_type  Dictionary(Int8, Utf8)  no
+status      Utf8                    no
+amount      Decimal128(10, 2)       yes
+tags        List                    yes
+  item      Utf8                    yes
+```
+
+```console
+$ parqcat cat events.parquet | jq -r 'select(.event_type == "checkout") | .user' | sort | uniq -c | sort -rn | head -3
+     65 grace
+     64 frances
+     63 margaret
+```
+
+## Why parqcat?
+
+Parquet is a great storage format, but taking a quick look at a file usually means starting Python, a JVM tool, or a SQL engine. `parqcat` covers the everyday terminal workflow instead:
+
+- **One native binary.** Install it once and it starts instantly. It needs no runtime.
+- **Works for people and pipelines.** At a terminal you get a readable table. When the output is piped or redirected, you get newline-delimited JSON, ready for `jq`, `grep`, or a script.
+- **Understands real-world data.** It handles nested lists, structs, and maps, as well as dictionary-encoded columns, decimals, dates, times, timestamps, and binary values.
+- **Fits Unix habits.** The commands are `cat`, `head`, `tail`, and `schema`. Data goes to stdout and diagnostics go to stderr.
 
 ## Install
 
 With Homebrew (macOS and Linux):
 
-```text
+```sh
 brew install r0k3/tap/parqcat
+```
+
+With the prebuilt installer (macOS and Linux):
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/r0k3/parqcat/releases/latest/download/parqcat-installer.sh | sh
 ```
 
 From crates.io:
 
-```text
+```sh
 cargo install --locked parqcat
 ```
 
 From this repository:
 
-```text
+```sh
 cargo install --locked --path .
 ```
 
@@ -30,77 +78,64 @@ cargo install --locked --path .
 
 Building requires Rust 1.97 or newer. `parqcat` supports the latest stable Rust release and the two before it; the minimum version is raised as new releases come out.
 
-For development:
-
-```text
-cargo build
-cargo test
-```
-
-## Features
-
-- Native Rust CLI with no Python or JVM runtime dependency.
-- `cat`, `head`, and `tail` commands for row inspection.
-- `schema` command for logical schema inspection without decoding row data.
-- Table output for quick terminal viewing.
-- JSONL output for scripts and pipelines.
-- Support for common Parquet primitive, nested, dictionary, temporal, decimal, and binary values.
-
 ## Usage
 
 ```text
-parqcat cat <FILE>
-parqcat head [-n <N>] <FILE>
-parqcat tail [-n <N>] <FILE>
-parqcat schema <FILE>
+parqcat cat <FILE>              every row
+parqcat head [-n <N>] <FILE>    the first N rows (default 10)
+parqcat tail [-n <N>] <FILE>    the last N rows (default 10)
+parqcat schema <FILE>           the logical schema, without decoding row data
 ```
 
-Examples:
+Row commands choose their format automatically: a compact table when stdout is a terminal, and JSONL when it is piped or redirected. You can override this with `-t`/`--table` or `-j`/`--jsonl`:
 
-```text
-parqcat cat data.parquet
-parqcat head -n 20 events.parquet
-parqcat tail --lines 5 archive/events.parquet
-parqcat schema data.parquet
+```console
+$ parqcat head -j -n 2 events.parquet
+{"id":1000,"ts":"2025-10-09T08:53:20.000Z","user":"ada","event_type":"page_view","status":"failed","amount":null,"tags":[]}
+{"id":1001,"ts":"2025-10-09T08:53:57.892Z","user":"margaret","event_type":"refund","status":"ok","amount":"-24.21","tags":["vip"]}
 ```
 
-When stdout is a terminal, row commands default to compact table output. When stdout is piped or redirected, row commands default to compact newline-delimited JSON.
+## Recipes
 
-```text
-parqcat cat events.parquet | jq -r '.event_type'
-parqcat head -n 100 events.parquet | jq 'select(.status == "failed")'
+Find failed events and keep only the fields you care about:
+
+```console
+$ parqcat cat events.parquet | jq -c 'select(.status == "failed") | {id, user, event_type}' | head -3
+{"id":1000,"user":"ada","event_type":"page_view"}
+{"id":1008,"user":"margaret","event_type":"search"}
+{"id":1015,"user":"linus","event_type":"checkout"}
 ```
 
-Force JSONL with `-j` or `--jsonl`:
+Pretty-print the last row:
 
-```text
-parqcat cat -j events.parquet
+```console
+$ parqcat tail -n 1 events.parquet | jq .
+{
+  "id": 2999,
+  "ts": "2025-10-10T05:26:29.173Z",
+  "user": "linus",
+  "event_type": "page_view",
+  "status": "ok",
+  "amount": null,
+  "tags": null
+}
 ```
 
-Force table output with `-t` or `--table`:
+Count the rows:
 
-```text
-parqcat head -t -n 20 events.parquet
+```console
+$ parqcat cat events.parquet | wc -l
+2000
 ```
 
 ## Output
 
-JSONL output is one compact JSON object per logical row. It writes only data to stdout; diagnostics go to stderr.
+**JSONL** has one compact JSON object per row. Decimals are written as strings so no precision is lost. Timestamps use RFC 3339 format, and binary values are written as `base64:...` strings.
 
-Table output is intended for humans. It is compact, deterministic, uncolored, and may truncate very wide values. Date, time, and timestamp columns reserve enough width for common rendered values.
+**Tables** are meant for people. They are compact, deterministic, and uncolored. Very wide values are truncated, and nested values are shown as JSON. Date, time, and timestamp columns reserve enough width for common rendered values. In schema output, nested fields are indented below their parent field.
 
-Schema output is a compact table:
-
-```text
-name      type     nullable
---------  -------  --------
-id        Int32    no
-name      Utf8     yes
-```
-
-Nested schema fields are indented below their parent field.
-
-## Supported Input
+<details>
+<summary><strong>Supported input</strong></summary>
 
 `parqcat` targets mainstream, unencrypted local Parquet files.
 
@@ -123,11 +158,13 @@ Not supported in v1:
 - CSV output
 - encrypted Parquet files requiring keys
 
+</details>
+
 ## Development
 
 Run the local checks before opening a change:
 
-```text
+```sh
 cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
