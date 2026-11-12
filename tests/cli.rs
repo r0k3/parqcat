@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
@@ -245,11 +246,68 @@ fn output_streams_cleanly_into_jq() {
 }
 
 #[test]
+fn stdin_pipe_matches_the_same_file() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("flat.parquet");
+    write_flat_fixture(&path);
+    let bytes = std::fs::read(&path).unwrap();
+
+    let expected = [
+        r#"{"id":1,"name":"alpha","active":true,"score":1.5,"payload":"base64:AAEC"}"#,
+        r#"{"id":2,"name":"beta","active":false,"score":"NaN","payload":"base64:aGk="}"#,
+        r#"{"id":3,"name":null,"active":true,"score":"+Inf","payload":"base64:/w=="}"#,
+        r#"{"id":4,"name":"delta","active":null,"score":"-Inf","payload":"base64:"}"#,
+        r#"{"id":5,"name":"epsilon","active":true,"score":null,"payload":"base64:AP8="}"#,
+    ]
+    .join("\n")
+        + "\n";
+    let head_two = expected.lines().take(2).collect::<Vec<_>>().join("\n") + "\n";
+    let tail_one = expected.lines().last().unwrap().to_string() + "\n";
+
+    let cases = [
+        (vec!["head", "-j"], expected.clone()),
+        (vec!["head", "-j", "-"], expected.clone()),
+        (vec!["head", "-j", "-n", "2"], head_two),
+        (vec!["cat", "-j"], expected.clone()),
+        (vec!["tail", "-j", "-n", "1"], tail_one),
+    ];
+
+    for (args, expected_stdout) in cases {
+        let from_stdin = run_with_stdin(&args, &bytes);
+        assert_success(from_stdin, &expected_stdout);
+    }
+
+    let schema_file = parqcat().arg("schema").arg(&path).output().unwrap();
+    let schema_stdin = run_with_stdin(&["schema"], &bytes);
+    assert_success(schema_file, &stdout(&schema_stdin));
+    assert!(stdout(&schema_stdin).contains("id"));
+    assert!(stdout(&schema_stdin).contains("Int32"));
+
+    let empty = run_with_stdin(&["head", "-j"], b"");
+    assert_eq!(empty.status.code(), Some(1));
+    assert_eq!(stdout(&empty), "");
+    assert!(!stderr(&empty).is_empty());
+}
+
+fn run_with_stdin(args: &[&str], bytes: &[u8]) -> Output {
+    let mut child = parqcat()
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(bytes).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
 fn usage_and_runtime_errors_have_expected_exit_codes() {
     let help = parqcat().arg("--help").output().unwrap();
     assert!(help.status.success());
     assert!(stdout(&help).contains("Usage:"));
     assert!(stdout(&help).contains("schema"));
+    assert!(stdout(&help).contains("read Parquet bytes from stdin"));
     assert_eq!(stderr(&help), "");
 
     let version = parqcat().arg("--version").output().unwrap();
@@ -268,9 +326,12 @@ fn usage_and_runtime_errors_have_expected_exit_codes() {
     assert_eq!(signed_count.status.code(), Some(2));
     assert!(stderr(&signed_count).contains("non-negative integer"));
 
-    let stdin = parqcat().args(["cat", "-"]).output().unwrap();
-    assert_eq!(stdin.status.code(), Some(1));
-    assert!(stderr(&stdin).contains("stdin is not supported"));
+    let two_files = parqcat()
+        .args(["cat", "a.parquet", "b.parquet"])
+        .output()
+        .unwrap();
+    assert_eq!(two_files.status.code(), Some(2));
+    assert!(stderr(&two_files).contains("exactly one file path"));
 
     let schema_format = parqcat()
         .args(["schema", "-j", "file.parquet"])

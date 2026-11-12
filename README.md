@@ -81,11 +81,13 @@ Building requires Rust 1.97 or newer. `parqcat` supports the latest stable Rust 
 ## Usage
 
 ```text
-parqcat cat <FILE>              every row
-parqcat head [-n <N>] <FILE>    the first N rows (default 10)
-parqcat tail [-n <N>] <FILE>    the last N rows (default 10)
-parqcat schema <FILE>           the logical schema, without decoding row data
+parqcat cat [FILE]              every row
+parqcat head [-n <N>] [FILE]    the first N rows (default 10)
+parqcat tail [-n <N>] [FILE]    the last N rows (default 10)
+parqcat schema [FILE]           the logical schema, without decoding row data
 ```
+
+Omit `FILE`, or pass `-`, to read Parquet bytes from stdin.
 
 Row commands choose their format automatically: a compact table when stdout is a terminal, and JSONL when it is piped or redirected. You can override this with `-t`/`--table` or `-j`/`--jsonl`:
 
@@ -105,6 +107,14 @@ $ parqcat cat events.parquet | jq -c 'select(.status == "failed") | {id, user, e
 {"id":1008,"user":"margaret","event_type":"search"}
 {"id":1015,"user":"linus","event_type":"checkout"}
 ```
+
+Inspect a file that was compressed outside Parquet:
+
+```console
+$ zstdcat events.parquet.zst | parqcat head
+```
+
+`parqcat` copies that stream to a temporary file before it reads. The Parquet footer is at the end, so `head` waits until `zstdcat` finishes.
 
 Pretty-print the last row:
 
@@ -142,6 +152,7 @@ $ parqcat cat events.parquet | wc -l
 Supported:
 
 - local file paths
+- stdin, as Parquet bytes (`-` or an omitted file)
 - common primitive types
 - nullable fields
 - dictionary encoding
@@ -150,10 +161,9 @@ Supported:
 
 Not supported in v1:
 
-- stdin
 - remote object stores
 - multiple input files
-- outer compression wrappers such as `.gz`, `.zst`, and `.zstd`
+- outer compression wrappers such as `.gz`, `.zst`, and `.zstd` (decompress them and pipe the Parquet bytes in)
 - SQL, filtering, projection, or file mutation
 - CSV output
 - encrypted Parquet files requiring keys

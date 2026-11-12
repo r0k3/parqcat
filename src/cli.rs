@@ -122,6 +122,10 @@ fn parse_counted(
                 flags_done = true;
                 i += 1;
             }
+            Some("-") => {
+                common.positional.push(arg.clone());
+                i += 1;
+            }
             Some("-n") | Some("--lines") => {
                 let Some(value) = args.get(i + 1) else {
                     return usage(
@@ -260,7 +264,7 @@ fn one_positional(
     help: String,
 ) -> std::result::Result<PathBuf, UsageError> {
     match positional.as_slice() {
-        [] => usage(format!("`{name}` requires exactly one file path"), help),
+        [] => Ok(PathBuf::from("-")),
         [file] => Ok(PathBuf::from(file)),
         _ => usage(format!("`{name}` accepts exactly one file path"), help),
     }
@@ -313,10 +317,12 @@ fn top_help() -> String {
 parqcat {}
 
 Usage:
-  parqcat cat <FILE>
-  parqcat head [-n <N>] <FILE>
-  parqcat tail [-n <N>] <FILE>
-  parqcat schema <FILE>
+  parqcat cat [FILE]
+  parqcat head [-n <N>] [FILE]
+  parqcat tail [-n <N>] [FILE]
+  parqcat schema [FILE]
+
+Omit FILE, or pass `-`, to read Parquet bytes from stdin.
 
 Commands:
   cat       Emit every row
@@ -339,7 +345,9 @@ Options:
 fn cat_help() -> String {
     "\
 Usage:
-  parqcat cat <FILE>
+  parqcat cat [FILE]
+
+FILE defaults to stdin. `-` also reads stdin.
 
 Options:
   -j, --jsonl    Force compact JSONL output
@@ -352,7 +360,9 @@ Options:
 fn schema_help() -> String {
     "\
 Usage:
-  parqcat schema <FILE>
+  parqcat schema [FILE]
+
+FILE defaults to stdin. `-` also reads stdin.
 
 Options:
   -h, --help     Show help
@@ -364,9 +374,11 @@ fn counted_help(name: &str) -> String {
     format!(
         "\
 Usage:
-  parqcat {name} <FILE>
-  parqcat {name} -n <N> <FILE>
-  parqcat {name} --lines <N> <FILE>
+  parqcat {name} [FILE]
+  parqcat {name} -n <N> [FILE]
+  parqcat {name} --lines <N> [FILE]
+
+FILE defaults to stdin. `-` also reads stdin.
 
 Options:
   -n, --lines <N>    Number of rows to emit, default 10
